@@ -59,6 +59,9 @@ install_data('data/dev.sinty.monitor.desktop',
 install_data('data/dev.sinty.monitor.gschema.xml',
   install_dir: get_option('datadir') / 'glib-2.0' / 'schemas'
 )
+install_data('data/dev.sinty.monitor.json',
+  install_dir: get_option('datadir') / 'singularity' / 'app-settings'
+)
 install_data('data/icons/dev.sinty.monitor.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps'
 )

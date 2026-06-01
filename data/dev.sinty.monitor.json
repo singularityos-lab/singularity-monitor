@@ -1,0 +1,27 @@
+{
+    "schema-id": "dev.sinty.monitor",
+    "settings": [
+        {
+            "key": "update-interval",
+            "label": "Update Interval (ms)",
+            "type": "int",
+            "widget": "spin",
+            "min": 250,
+            "max": 10000
+        },
+        {
+            "key": "show-per-core",
+            "label": "Show Per-Core CPU Bars",
+            "type": "boolean",
+            "widget": "switch"
+        },
+        {
+            "key": "history-size",
+            "label": "Graph History Size",
+            "type": "int",
+            "widget": "spin",
+            "min": 10,
+            "max": 300
+        }
+    ]
+}
