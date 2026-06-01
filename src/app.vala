@@ -302,7 +302,7 @@ namespace Singularity.Apps {
 
             // CPU card
             cpu_value_lbl = new Label("0%");
-            cpu_sub_lbl   = new Label("Loading…");
+            cpu_sub_lbl   = new Label(_("Loading…"));
             cpu_spark     = new SparkLine(60, "#3584e4", "#3584e4");
             var cpu_card  = make_stat_card("CPU", "computer-symbolic", cpu_spark, cpu_value_lbl, cpu_sub_lbl);
 
@@ -325,7 +325,7 @@ namespace Singularity.Apps {
             var mem_card  = make_stat_card("Memory", "drive-multidisk-symbolic", mem_spark, mem_value_lbl, mem_sub_lbl);
 
             // Disk card
-            disk_value_lbl = new Label("0 KB/s");
+            disk_value_lbl = new Label(_("0 KB/s"));
             disk_sub_lbl   = new Label("");
             disk_read_spark  = new SparkLine(60, "#2ecc71", "#2ecc71");
             disk_write_spark = new SparkLine(60, "#e74c3c", "#e74c3c");
@@ -334,7 +334,7 @@ namespace Singularity.Apps {
                                                disk_value_lbl, disk_sub_lbl, disk_overlay);
 
             // Network card
-            net_value_lbl = new Label("↓ 0 KB/s");
+            net_value_lbl = new Label(_("↓ 0 KB/s"));
             net_sub_lbl   = new Label("");
             net_rx_spark  = new SparkLine(60, "#f39c12", "#f39c12");
             net_tx_spark  = new SparkLine(60, "#1abc9c", "#1abc9c");
@@ -672,7 +672,7 @@ namespace Singularity.Apps {
 
         private void confirm_signal_multi(ProcessInfo[] procs, int sig, string action, string detail) {
             var dialog = new Singularity.Widgets.AppDialog((Gtk.Application)this, true);
-            dialog.set_title("%s %d processes?".printf(action, procs.length));
+            dialog.set_title(_("%s %d processes?").printf(action, procs.length));
             dialog.transient_for = main_window;
             dialog.set_default_size(360, 220);
 
@@ -689,7 +689,7 @@ namespace Singularity.Apps {
             btns.halign = Align.END;
             btns.margin_top = 8;
 
-            var cancel_btn = new Button.with_label("Cancel");
+            var cancel_btn = new Button.with_label(_("Cancel"));
             cancel_btn.clicked.connect(() => dialog.close());
             btns.append(cancel_btn);
 
@@ -710,7 +710,7 @@ namespace Singularity.Apps {
 
         private void confirm_signal(ProcessInfo p, int sig, string action, string detail) {
             var dialog = new Singularity.Widgets.AppDialog((Gtk.Application)this, true);
-            dialog.set_title("%s \"%s\"?".printf(action, p.name));
+            dialog.set_title(_("%s \"%s\"?").printf(action, p.name));
             dialog.transient_for = main_window;
             dialog.set_default_size(360, 220);
 
@@ -718,7 +718,7 @@ namespace Singularity.Apps {
             box.margin_top = box.margin_bottom = 24;
             box.margin_start = box.margin_end = 24;
 
-            var lbl = new Label(detail + "\n\nPID: %d".printf(p.pid));
+            var lbl = new Label(detail + _("\n\nPID: %d").printf(p.pid));
             lbl.wrap = true;
             lbl.halign = Align.START;
             box.append(lbl);
@@ -727,7 +727,7 @@ namespace Singularity.Apps {
             btns.halign = Align.END;
             btns.margin_top = 8;
 
-            var cancel_btn = new Button.with_label("Cancel");
+            var cancel_btn = new Button.with_label(_("Cancel"));
             cancel_btn.clicked.connect(() => dialog.close());
             btns.append(cancel_btn);
 
@@ -747,7 +747,7 @@ namespace Singularity.Apps {
 
         private void show_proc_properties(ProcessInfo p) {
             var dialog = new Singularity.Widgets.AppDialog((Gtk.Application)this, false);
-            dialog.set_title("Properties");
+            dialog.set_title(_("Properties"));
             dialog.transient_for = main_window;
             dialog.set_default_size(400, 460);
 
@@ -813,7 +813,7 @@ namespace Singularity.Apps {
 
             box.append(grid);
 
-            var close_btn = new Button.with_label("Close");
+            var close_btn = new Button.with_label(_("Close"));
             close_btn.halign = Align.END;
             close_btn.add_css_class("close-button");
             close_btn.clicked.connect(() => dialog.close());
@@ -825,7 +825,7 @@ namespace Singularity.Apps {
 
         private void show_proc_maps(ProcessInfo p) {
             var dialog = new Singularity.Widgets.AppDialog((Gtk.Application)this, false);
-            dialog.set_title("Memory Maps - %s".printf(p.name));
+            dialog.set_title(_("Memory Maps - %s").printf(p.name));
             dialog.transient_for = main_window;
             dialog.set_default_size(860, 520);
 
@@ -892,7 +892,7 @@ namespace Singularity.Apps {
             scroll.hexpand = true;
             scroll.margin_bottom = 8;
 
-            var close_btn_maps = new Button.with_label("Close");
+            var close_btn_maps = new Button.with_label(_("Close"));
             close_btn_maps.halign = Align.END;
             close_btn_maps.margin_top = 8;
             close_btn_maps.margin_bottom = 8;
@@ -907,7 +907,7 @@ namespace Singularity.Apps {
 
         private void show_proc_open_files(ProcessInfo p) {
             var dialog = new Singularity.Widgets.AppDialog((Gtk.Application)this, false);
-            dialog.set_title("Open Files - %s".printf(p.name));
+            dialog.set_title(_("Open Files - %s").printf(p.name));
             dialog.transient_for = main_window;
             dialog.set_default_size(640, 460);
 
@@ -950,7 +950,7 @@ namespace Singularity.Apps {
             scroll.hexpand = true;
             scroll.margin_bottom = 8;
 
-            var close_btn_files = new Button.with_label("Close");
+            var close_btn_files = new Button.with_label(_("Close"));
             close_btn_files.halign = Align.END;
             close_btn_files.margin_top = 8;
             close_btn_files.margin_bottom = 8;
@@ -1128,7 +1128,7 @@ namespace Singularity.Apps {
                     _last_mem_pct = pct;
                     mem_spark.push(pct);
                     mem_value_lbl.label = "%d%%".printf((int)(pct * 100));
-                    mem_sub_lbl.label   = "%s / %s  (cached %s)".printf(
+                    mem_sub_lbl.label   = _("%s / %s  (cached %s)").printf(
                         format_kb(used), format_kb(total), format_kb(cached + buffers));
                 }
             } catch {}
@@ -1160,8 +1160,8 @@ namespace Singularity.Apps {
 
                 disk_read_spark.push((double)read_kbs  / max_kbs);
                 disk_write_spark.push((double)write_kbs / max_kbs);
-                disk_value_lbl.label = "↑ %s/s".printf(format_kb(write_kbs));
-                disk_sub_lbl.label   = "↓ %s/s read".printf(format_kb(read_kbs));
+                disk_value_lbl.label = _("↑ %s/s").printf(format_kb(write_kbs));
+                disk_sub_lbl.label   = _("↓ %s/s read").printf(format_kb(read_kbs));
             } catch {}
         }
 
@@ -1202,8 +1202,8 @@ namespace Singularity.Apps {
 
                 net_rx_spark.push((double)rx_kbs / max_kbs);
                 net_tx_spark.push((double)tx_kbs / max_kbs);
-                net_value_lbl.label = "↓ %s/s".printf(format_kb(rx_kbs));
-                net_sub_lbl.label   = "↑ %s/s sent".printf(format_kb(tx_kbs));
+                net_value_lbl.label = _("↓ %s/s").printf(format_kb(rx_kbs));
+                net_sub_lbl.label   = _("↑ %s/s sent").printf(format_kb(tx_kbs));
             } catch {}
         }
 

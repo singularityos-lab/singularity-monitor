@@ -17,7 +17,7 @@ namespace Singularity.Apps {
 
         public MonitorWindow(Gtk.Application app) {
             Object(application: app);
-            set_title("System Monitor");
+            set_title(_("System Monitor"));
             set_default_size(1100, 640);
         }
     }
