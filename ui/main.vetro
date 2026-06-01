@@ -1,0 +1,10 @@
+Template(class: "SingularityAppsMonitorWindow", parent: "SingularityWidgetsWindow") {
+    HBox(id: "main_hbox", spacing: 0, hexpand: true, vexpand: true) {
+        ScrolledWindow(id: "left_scroll", vexpand: true)
+
+        Separator(id: "main_sep", orientation: "vertical")
+            .cssClass("monitor-vsep")
+
+        VBox(id: "right_host", spacing: 0, hexpand: true, vexpand: true)
+    }
+}

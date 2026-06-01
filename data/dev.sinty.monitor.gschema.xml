@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="dev.sinty.monitor" path="/dev/sinty/monitor/">
+    <key name="update-interval" type="i">
+      <default>1500</default>
+      <summary>Update interval in ms</summary>
+      <description>How often to refresh resource stats (milliseconds).</description>
+    </key>
+    <key name="show-per-core" type="b">
+      <default>true</default>
+      <summary>Show per-core CPU bars</summary>
+      <description>Whether to display individual CPU core activity bars.</description>
+    </key>
+    <key name="history-size" type="i">
+      <default>60</default>
+      <summary>Graph history size</summary>
+      <description>Number of data points to retain in sparkline graphs.</description>
+    </key>
+  </schema>
+</schemalist>

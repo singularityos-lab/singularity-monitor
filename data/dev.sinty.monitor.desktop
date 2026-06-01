@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=System Monitor
+Comment=Monitor CPU, memory, disk and network activity
+Exec=singularity-monitor
+Icon=dev.sinty.monitor
+Type=Application
+Categories=System;Monitor;
+StartupNotify=true
+StartupWMClass=dev.sinty.monitor

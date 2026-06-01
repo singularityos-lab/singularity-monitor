@@ -1,0 +1,8 @@
+[Widget]
+Id=monitor.system-stats
+ProviderId=dev.sinty.monitor
+Name=System Stats
+IconName=utilities-system-monitor-symbolic
+Sizes=1x1;1x2;2x2;4x2
+Module=libsingularity-monitor-widget.so
+ModuleSymbol=singularity_monitor_widget_new
