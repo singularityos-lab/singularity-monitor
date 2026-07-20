@@ -102,6 +102,15 @@ namespace Singularity.Apps {
         private Label     mem_value_lbl;
         private Label     mem_sub_lbl;
 
+        // ── Memory Tiering (MTS) ────────────────────────────────────────────
+        private bool      mts_present   = false;
+        private string    mts_cold_path = "";
+        private int64     mts_capacity  = 0;
+        private string    mts_mode      = "";
+        private SparkLine mts_spark;
+        private Label     mts_value_lbl;
+        private Label     mts_sub_lbl;
+
         // ── Disk ────────────────────────────────────────────────────────────
         private ulong   disk_last_read  = 0;
         private ulong   disk_last_write = 0;
@@ -295,6 +304,8 @@ namespace Singularity.Apps {
         // ── Resources column (left panel) ───────────────────────────────────
 
         private Widget build_resources_column() {
+            detect_mts();
+
             var col = new Box(Orientation.VERTICAL, 12);
             col.margin_bottom = 16;
             col.margin_start  = 14;
@@ -347,7 +358,66 @@ namespace Singularity.Apps {
             col.append(disk_card);
             col.append(net_card);
 
+            if (mts_present) {
+                mts_value_lbl = new Label("0%");
+                mts_sub_lbl   = new Label("");
+                mts_spark     = new SparkLine(60, "#16a085", "#16a085");
+                var mts_card  = make_stat_card("Memory Tiering", "drive-multidisk-symbolic",
+                                               mts_spark, mts_value_lbl, mts_sub_lbl);
+                col.append(mts_card);
+            }
+
             return col;
+        }
+
+        // ── Memory Tiering (MTS) ────────────────────────────────────────────
+
+        private void detect_mts() {
+            mts_present = false;
+            mts_cold_path = "";
+            mts_capacity = 0;
+            mts_mode = "";
+            if (!FileUtils.test("/dev/mts", FileTest.EXISTS)) return;
+            string conf;
+            try { FileUtils.get_contents("/etc/mts/mts.conf", out conf); } catch { return; }
+            bool in_cold = false;
+            foreach (var raw in conf.split("\n")) {
+                var line = raw.strip();
+                if (line.has_prefix("[")) {
+                    var head = line.down();
+                    in_cold = head.has_prefix("[tier") && head.contains("cold");
+                    continue;
+                }
+                if (mts_mode == "" && line.down().has_prefix("mode=")) {
+                    var eq = line.index_of("=");
+                    if (eq >= 0) mts_mode = line.substring(eq + 1).strip();
+                }
+                if (in_cold && line.has_prefix("Provider=")) {
+                    mts_cold_path = line.substring("Provider=".length).strip();
+                }
+                if (in_cold && line.has_prefix("CapacityBytes=")) {
+                    mts_capacity = int64.parse(line.substring("CapacityBytes=".length).strip());
+                }
+            }
+            if (mts_cold_path != "" && mts_capacity > 0) mts_present = true;
+        }
+
+        private void update_mts() {
+            if (!mts_present) return;
+            try {
+                var f = File.new_for_path(mts_cold_path);
+                var info = f.query_info(FileAttribute.STANDARD_ALLOCATED_SIZE,
+                                        FileQueryInfoFlags.NONE);
+                int64 used = (int64)info.get_attribute_uint64(FileAttribute.STANDARD_ALLOCATED_SIZE);
+                double pct = mts_capacity > 0 ? (double)used / (double)mts_capacity : 0;
+                if (pct > 1) pct = 1;
+                if (pct < 0) pct = 0;
+                mts_spark.push(pct);
+                mts_value_lbl.label = "%d%%".printf((int)(pct * 100));
+                string mode = mts_mode != "" ? mts_mode : "enforce";
+                mts_sub_lbl.label = _("%s   cold %s / %s").printf(
+                    mode, format_kb((ulong)(used / 1024)), format_kb((ulong)(mts_capacity / 1024)));
+            } catch {}
         }
 
         private Overlay build_dual_chart(SparkLine a, SparkLine b) {
@@ -1007,6 +1077,7 @@ namespace Singularity.Apps {
             update_memory();
             update_disk();
             update_network();
+            update_mts();
             push_dock_widgets();
             return true;
         }
