@@ -74,6 +74,8 @@ namespace Singularity.Apps {
         private DockSurface? _dock = null;
         private double _last_cpu_pct = 0;
         private double _last_mem_pct = 0;
+        private double _last_gpu_pct = -1;
+        private SensorMonitor gpu_monitor;
 
         private MonitorWindow main_window;
 
@@ -96,6 +98,11 @@ namespace Singularity.Apps {
         private Label      cpu_sub_lbl;
         private Box        core_bars_box;
         private MiniBar[]  core_bars;
+
+        private SparkLine gpu_spark;
+        private Label     gpu_value_lbl;
+        private Label     gpu_sub_lbl;
+        private Widget    gpu_card;
 
         // ── Memory ──────────────────────────────────────────────────────────
         private SparkLine mem_spark;
@@ -232,6 +239,10 @@ namespace Singularity.Apps {
             main_window.set_sidebar_width(320);
             main_window.set_sidebar_visible(true);
 
+            gpu_monitor = new SensorMonitor();
+            gpu_monitor.updated.connect(update_gpu);
+            gpu_monitor.start(1);
+
             // Right panel - process list
             var right_box = build_processes_panel();
             main_window.right_host.append(right_box);
@@ -280,6 +291,7 @@ namespace Singularity.Apps {
                 if (_resource_timer  != 0) { Source.remove(_resource_timer);  _resource_timer  = 0; }
                 if (_process_timer   != 0) { Source.remove(_process_timer);   _process_timer   = 0; }
                 if (_proc_refresh_id != 0) { Source.remove(_proc_refresh_id); _proc_refresh_id = 0; }
+                gpu_monitor.stop();
                 return false;
             });
 
@@ -329,6 +341,13 @@ namespace Singularity.Apps {
             }
             cpu_card.append(core_bars_box);
 
+            gpu_value_lbl = new Label("0%");
+            gpu_sub_lbl   = new Label(HardwareInfo.graphics());
+            gpu_spark     = new SparkLine(60, "#f39c12", "#f39c12");
+            gpu_card      = make_stat_card("GPU", "video-display-symbolic",
+                                           gpu_spark, gpu_value_lbl, gpu_sub_lbl);
+            gpu_card.visible = false;
+
             // Memory card
             mem_value_lbl = new Label("0%");
             mem_sub_lbl   = new Label("");
@@ -354,6 +373,7 @@ namespace Singularity.Apps {
                                               net_value_lbl, net_sub_lbl, net_overlay);
 
             col.append(cpu_card);
+            col.append(gpu_card);
             col.append(mem_card);
             col.append(disk_card);
             col.append(net_card);
@@ -1082,6 +1102,18 @@ namespace Singularity.Apps {
             return true;
         }
 
+        private void update_gpu() {
+            double value = gpu_monitor.gpu_utilization;
+            _last_gpu_pct = value;
+            gpu_card.visible = value >= 0.0;
+            if (value < 0.0) {
+                return;
+            }
+            gpu_spark.push(value);
+            gpu_value_lbl.label = "%d%%".printf((int) (value * 100));
+            push_dock_widgets();
+        }
+
         private void push_dock_widgets() {
             if (_dock == null) {
                 try {
@@ -1093,6 +1125,9 @@ namespace Singularity.Apps {
                 var arr = new VariantBuilder(new VariantType("a(sa{sv})"));
                 arr.add_value(build_circular("cpu", _last_cpu_pct, "CPU", "#3584e4"));
                 arr.add_value(build_circular("mem", _last_mem_pct, "Memory", "#33d17a"));
+                if (_last_gpu_pct >= 0.0) {
+                    arr.add_value(build_circular("gpu", _last_gpu_pct, "GPU", "#f39c12"));
+                }
                 _dock.SetSuffix("dev.sinty.monitor", arr.end());
             } catch (Error e) {
                 _dock = null;

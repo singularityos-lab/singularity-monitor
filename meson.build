@@ -18,10 +18,18 @@ math_dep  = cc.find_library('m')
 libsingularity_dep = dependency('singularity-1.0',
   fallback: ['libsingularity', 'libsingularity_dep']
 )
+system_dep = dependency('singularity-system-1.0',
+  fallback: ['libsingularity', 'libsingularity_system_dep']
+)
 
 if not meson.is_subproject() and libsingularity_dep.type_name() == 'internal'
   libsingularity_vapi_dir = join_paths(meson.project_build_root(), 'subprojects', 'libsingularity')
   add_project_arguments(['--vapidir=' + libsingularity_vapi_dir], language: 'vala')
+endif
+
+if system_dep.type_name() == 'internal'
+  system_vapi_dir = join_paths(meson.current_source_dir(), '..', 'libsingularity', 'src', 'vapi')
+  add_project_arguments(['--vapidir=' + system_vapi_dir], language: 'vala')
 endif
 
 subdir('ui')
@@ -42,14 +50,14 @@ sources = files(
 
 executable('singularity-monitor',
   sources + [resources],
-  dependencies: [gtk_dep, gee_dep, math_dep, libsingularity_dep],
+  dependencies: [gtk_dep, gee_dep, math_dep, libsingularity_dep, system_dep],
   vala_args: ['--pkg=posix'],
   install: true
 )
 
 shared_module('singularity-monitor-widget',
   files('widget/system_stats_widget.vala'),
-  dependencies: [gtk_dep, cairo_dep, libsingularity_dep],
+  dependencies: [gtk_dep, cairo_dep, libsingularity_dep, system_dep],
   install: true,
   install_dir: get_option('libdir') / 'singularity' / 'widgets'
 )

@@ -29,20 +29,25 @@ namespace SingularityMonitorWidget {
     }
 
     /**
-     * CPU + RAM (and battery, when present) with rolling sparkline charts -
-     * mirrors the look of the sidebar status-monitor plugin. Reads /proc
-     * and /sys/class/power_supply directly, no app process required.
+     * Resource usage with rolling sparkline charts, plus battery when present.
+     * Mirrors the look of the sidebar status-monitor plugin without requiring
+     * the Monitor app process.
      */
     public class SystemStatsInstance : Gtk.Box {
         private const int HISTORY = 60;
         private double[] cpu_history;
         private double[] ram_history;
+        private double[] gpu_history;
         private double[] bat_history;
         private DrawingArea cpu_chart;
         private DrawingArea ram_chart;
+        private DrawingArea gpu_chart;
         private DrawingArea? bat_chart = null;
         private Label cpu_lbl;
         private Label ram_lbl;
+        private Label gpu_lbl;
+        private Widget gpu_row;
+        private SensorMonitor gpu_monitor;
         private Label? bat_lbl = null;
         private uint timer_id = 0;
         private uint64 last_total = 0;
@@ -50,6 +55,7 @@ namespace SingularityMonitorWidget {
         private string? bat_dir = null;
         private string accent_hex_cpu = "#3584e4";
         private string accent_hex_ram = "#9b59b6";
+        private string accent_hex_gpu = "#f39c12";
         private string accent_hex_bat = "#33b35a";
 
         public SystemStatsInstance(WidgetSize size) {
@@ -61,17 +67,25 @@ namespace SingularityMonitorWidget {
 
             cpu_history = new double[HISTORY];
             ram_history = new double[HISTORY];
+            gpu_history = new double[HISTORY];
             bat_history = new double[HISTORY];
 
             cpu_lbl = make_value_lbl();
             ram_lbl = make_value_lbl();
+            gpu_lbl = make_value_lbl();
             cpu_chart = new DrawingArea();
             ram_chart = new DrawingArea();
+            gpu_chart = new DrawingArea();
             cpu_chart.set_draw_func((d, c, w, h) =>
                 draw_chart(c, w, h, cpu_history, accent_hex_cpu));
             ram_chart.set_draw_func((d, c, w, h) =>
                 draw_chart(c, w, h, ram_history, accent_hex_ram));
+            gpu_chart.set_draw_func((d, c, w, h) =>
+                draw_chart(c, w, h, gpu_history, accent_hex_gpu));
             append(make_row("CPU", cpu_lbl, cpu_chart));
+            gpu_row = make_row("GPU", gpu_lbl, gpu_chart);
+            gpu_row.visible = false;
+            append(gpu_row);
             append(make_row("Memory", ram_lbl, ram_chart));
 
             bat_dir = find_battery();
@@ -84,10 +98,25 @@ namespace SingularityMonitorWidget {
             }
 
             tick();
+            gpu_monitor = new SensorMonitor();
+            gpu_monitor.updated.connect(update_gpu);
+            gpu_monitor.start(1);
             timer_id = GLib.Timeout.add(1000, () => { tick(); return GLib.Source.CONTINUE; });
             destroy.connect(() => {
                 if (timer_id != 0) { GLib.Source.remove(timer_id); timer_id = 0; }
+                gpu_monitor.stop();
             });
+        }
+
+        private void update_gpu() {
+            double value = gpu_monitor.gpu_utilization;
+            gpu_row.visible = value >= 0.0;
+            if (value < 0.0) {
+                return;
+            }
+            push(gpu_history, value);
+            gpu_lbl.label = "%d%%".printf((int) (value * 100));
+            gpu_chart.queue_draw();
         }
 
         private Label make_value_lbl() {
