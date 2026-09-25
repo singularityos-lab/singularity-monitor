@@ -1111,6 +1111,14 @@ namespace Singularity.Apps {
             }
             gpu_spark.push(value);
             gpu_value_lbl.label = "%d%%".printf((int) (value * 100));
+            if (gpu_monitor.vram_total_bytes > 0) {
+                gpu_sub_lbl.label = _("%s  (VRAM %s / %s)").printf(HardwareInfo.graphics(),
+                    format_kb((ulong) (gpu_monitor.vram_used_bytes / 1024)),
+                    format_kb((ulong) (gpu_monitor.vram_total_bytes / 1024)));
+            } else if (gpu_monitor.vram_used_bytes >= 0) {
+                gpu_sub_lbl.label = _("%s  (GPU memory %s)").printf(HardwareInfo.graphics(),
+                    format_kb((ulong) (gpu_monitor.vram_used_bytes / 1024)));
+            }
             push_dock_widgets();
         }
 
