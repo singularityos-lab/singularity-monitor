@@ -22,6 +22,7 @@ namespace Singularity.Apps {
         Intl.textdomain("singularity-monitor");
 
         var app = new MonitorApp();
+        new MonitorSearchProvider(app).export(app);
         return app.run(args);
     }
 

@@ -46,6 +46,7 @@ sources = files(
   'src/models.vala',
   'src/window.vala',
   'src/app.vala',
+  'src/search_provider.vala',
 )
 
 executable('singularity-monitor',
@@ -63,6 +64,19 @@ shared_module('singularity-monitor-widget',
 )
 install_data('widget/dev.sinty.monitor.system-stats.widget',
   install_dir: get_option('datadir') / 'singularity' / 'widgets'
+)
+
+service_conf = configuration_data()
+service_conf.set('bindir', get_option('prefix') / get_option('bindir'))
+configure_file(
+  input: 'data/dev.sinty.monitor.service.in',
+  output: 'dev.sinty.monitor.service',
+  configuration: service_conf,
+  install_dir: get_option('datadir') / 'dbus-1' / 'services'
+)
+install_data('data/dev.sinty.monitor.search-provider.ini',
+  rename: 'dev.sinty.monitor.ini',
+  install_dir: get_option('datadir') / 'singularity' / 'search-providers'
 )
 
 install_data('data/dev.sinty.monitor.desktop',

@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=dev.sinty.monitor
+Exec=@bindir@/singularity-monitor --gapplication-service

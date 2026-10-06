@@ -26,6 +26,10 @@ namespace Singularity.Apps {
         public string user       { get; set; default = ""; }
         public double cpu        { get; set; default = 0; }
         public ulong  mem_kb     { get; set; default = 0; }
+        public double gpu        { get; set; default = 0; }
+        public uint64 gpu_mem    { get; set; default = 0; }
+        public double net_rx     { get; set; default = 0; }
+        public double net_tx     { get; set; default = 0; }
         public string state      { get; set; default = ""; }
         public string group_key  { get; set; default = ""; }
 
@@ -44,6 +48,10 @@ namespace Singularity.Apps {
         public int    count      { get; set; default = 0; }
         public double cpu        { get; set; default = 0; }
         public ulong  mem_kb     { get; set; default = 0; }
+        public double gpu        { get; set; default = 0; }
+        public uint64 gpu_mem    { get; set; default = 0; }
+        public double net_rx     { get; set; default = 0; }
+        public double net_tx     { get; set; default = 0; }
         public bool   expanded   { get; set; default = false; }
         public Gee.ArrayList<ProcessInfo> processes { get; private set; }
 
@@ -58,15 +66,27 @@ namespace Singularity.Apps {
             count = processes.size;
             cpu += p.cpu;
             mem_kb += p.mem_kb;
+            gpu = double.min(gpu + p.gpu, 100);
+            gpu_mem += p.gpu_mem;
+            net_rx += p.net_rx;
+            net_tx += p.net_tx;
         }
 
         public void recalc() {
             count = processes.size;
             cpu = 0;
             mem_kb = 0;
+            gpu = 0;
+            gpu_mem = 0;
+            net_rx = 0;
+            net_tx = 0;
             foreach (var p in processes) {
                 cpu += p.cpu;
                 mem_kb += p.mem_kb;
+                gpu = double.min(gpu + p.gpu, 100);
+                gpu_mem += p.gpu_mem;
+                net_rx += p.net_rx;
+                net_tx += p.net_tx;
             }
         }
     }

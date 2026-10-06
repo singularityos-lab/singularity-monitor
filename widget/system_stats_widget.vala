@@ -47,7 +47,8 @@ namespace SingularityMonitorWidget {
         private Label ram_lbl;
         private Label gpu_lbl;
         private Widget gpu_row;
-        private SensorMonitor gpu_monitor;
+        private GLib.MainContext? sampler_context = null;
+        private GLib.MainLoop? sampler_loop = null;
         private Label? bat_lbl = null;
         private uint timer_id = 0;
         private uint64 last_total = 0;
@@ -60,7 +61,7 @@ namespace SingularityMonitorWidget {
 
         public SystemStatsInstance(WidgetSize size) {
             Object(orientation: Orientation.VERTICAL, spacing: 8);
-            add_css_class("overview-sysstats");
+            add_css_class("overview-widget-card");
             margin_start = 14; margin_end = 14;
             margin_top = 12; margin_bottom = 12;
             hexpand = true; vexpand = true;
@@ -98,18 +99,56 @@ namespace SingularityMonitorWidget {
             }
 
             tick();
-            gpu_monitor = new SensorMonitor();
-            gpu_monitor.updated.connect(update_gpu);
-            gpu_monitor.start(1);
-            timer_id = GLib.Timeout.add(1000, () => { tick(); return GLib.Source.CONTINUE; });
-            destroy.connect(() => {
-                if (timer_id != 0) { GLib.Source.remove(timer_id); timer_id = 0; }
-                gpu_monitor.stop();
+            map.connect(start_sampling);
+            unmap.connect(stop_sampling);
+            destroy.connect(stop_sampling);
+        }
+
+        private void start_sampling() {
+            if (timer_id == 0)
+                timer_id = GLib.Timeout.add(1000, () => { tick(); return GLib.Source.CONTINUE; });
+            if (sampler_loop != null) return;
+            var context = new GLib.MainContext();
+            var loop = new GLib.MainLoop(context);
+            sampler_context = context;
+            sampler_loop = loop;
+            new GLib.Thread<bool>("gpu-sampler", () => {
+                context.push_thread_default();
+                var monitor = new SensorMonitor();
+                monitor.updated.connect(() => {
+                    double value = monitor.gpu_utilization;
+                    GLib.Idle.add(() => {
+                        if (sampler_loop == loop) update_gpu(value);
+                        return GLib.Source.REMOVE;
+                    });
+                });
+                var timer = new GLib.TimeoutSource.seconds(1);
+                timer.set_callback(() => {
+                    monitor.refresh();
+                    return GLib.Source.CONTINUE;
+                });
+                timer.attach(context);
+                monitor.refresh();
+                loop.run();
+                timer.destroy();
+                context.pop_thread_default();
+                return true;
             });
         }
 
-        private void update_gpu() {
-            double value = gpu_monitor.gpu_utilization;
+        private void stop_sampling() {
+            if (timer_id != 0) { GLib.Source.remove(timer_id); timer_id = 0; }
+            if (sampler_loop == null) return;
+            var loop = sampler_loop;
+            sampler_context.invoke(() => {
+                loop.quit();
+                return GLib.Source.REMOVE;
+            });
+            sampler_loop = null;
+            sampler_context = null;
+        }
+
+        private void update_gpu(double value) {
             gpu_row.visible = value >= 0.0;
             if (value < 0.0) {
                 return;
@@ -128,7 +167,7 @@ namespace SingularityMonitorWidget {
 
         private Widget make_row(string title, Label value, DrawingArea chart) {
             var card = new Gtk.Box(Orientation.VERTICAL, 4);
-            card.add_css_class("overview-sysstats-card");
+            card.add_css_class("overview-widget-tile");
             card.hexpand = true; card.vexpand = true;
 
             var header = new Gtk.Box(Orientation.HORIZONTAL, 6);

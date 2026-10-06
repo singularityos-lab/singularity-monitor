@@ -167,16 +167,55 @@ namespace Singularity.Apps {
 
         // ── Processes state ──────────────────────────────────────────────────
         private HashTable<int, ProcessInfo> prev_procs;
+        private ProcessGpuUsage gpu_usage = new ProcessGpuUsage();
+        private ProcessNetworkUsage net_usage = new ProcessNetworkUsage();
 
         protected override void startup() {
             base.startup();
 
             var menu = new GLib.Menu();
             var file_menu = new GLib.Menu();
-            file_menu.append("Settings", "app.settings");
-            file_menu.append("Quit", "app.quit");
-            menu.append_submenu("File", file_menu);
+            file_menu.append(_("Close Window"), "win.close");
+            file_menu.append(_("Quit"), "app.quit");
+            menu.append_submenu(_("File"), file_menu);
+            var edit_menu = new GLib.Menu();
+            var edit_copy = new GLib.Menu();
+            edit_copy.append(_("Copy Name"), "win.copy-name");
+            edit_copy.append(_("Copy PID"), "win.copy-pid");
+            edit_menu.append_section(null, edit_copy);
+            var edit_find = new GLib.Menu();
+            edit_find.append(_("Find"), "win.find");
+            edit_menu.append_section(null, edit_find);
+            var edit_settings = new GLib.Menu();
+            edit_settings.append(_("Settings"), "app.settings");
+            edit_menu.append_section(null, edit_settings);
+            menu.append_submenu(_("Edit"), edit_menu);
+            var view_menu = new GLib.Menu();
+            view_menu.append(_("Show Sidebar"), "win.sidebar");
+            menu.append_submenu(_("View"), view_menu);
+            var proc_menu = new GLib.Menu();
+            var proc_signal = new GLib.Menu();
+            proc_signal.append(_("End Process…"), "win.end-process");
+            proc_signal.append(_("Force Kill…"), "win.kill-process");
+            proc_menu.append_section(null, proc_signal);
+            var proc_pause = new GLib.Menu();
+            proc_pause.append(_("Suspend"), "win.suspend-process");
+            proc_pause.append(_("Resume"), "win.resume-process");
+            proc_menu.append_section(null, proc_pause);
+            var proc_info = new GLib.Menu();
+            proc_info.append(_("Properties…"), "win.process-properties");
+            proc_info.append(_("Memory Maps…"), "win.process-maps");
+            proc_info.append(_("Open Files…"), "win.process-files");
+            proc_menu.append_section(null, proc_info);
+            menu.append_submenu(_("Process"), proc_menu);
             set_menubar(menu);
+            set_accels_for_action("app.settings", {"<Control>comma"});
+            set_accels_for_action("win.close", {"<Control>w"});
+            set_accels_for_action("win.find", {"<Control>f"});
+            set_accels_for_action("win.sidebar", {"F9"});
+            set_accels_for_action("win.end-process", {"<Control>e"});
+            set_accels_for_action("win.kill-process", {"<Control>k"});
+            set_accels_for_action("win.process-properties", {"<Alt>Return"});
 
             var act_settings = new SimpleAction("settings", null);
             act_settings.activate.connect(() => {
@@ -196,6 +235,10 @@ namespace Singularity.Apps {
         }
 
         protected override void activate() {
+            if (main_window != null) {
+                main_window.present();
+                return;
+            }
             setup_styles();
             main_window = new MonitorWindow(this);
 
@@ -206,7 +249,7 @@ namespace Singularity.Apps {
 
             // Bubble bar: always-visible SearchBubble (Store pattern,
             // no toggle icon).
-            var search_bubble = main_window.add_bubble_search ("Filter processes...", (t) => {
+            var search_bubble = main_window.add_bubble_search (_("Filter processes…"), (t) => {
                 _proc_list_model.search = t.strip ().down ();
                 refresh_processes ();
             });
@@ -257,18 +300,6 @@ namespace Singularity.Apps {
                     _proc_sel.select_all();
                     return true;
                 }
-                if (ctrl && kv == Gdk.Key.k) {
-                    var sel = get_selected_procs();
-                    if (sel.length == 0) return false;
-                    if (sel.length > 1) {
-                        confirm_signal_multi(sel, Posix.Signal.KILL, "Force Kill",
-                            "Sends SIGKILL to %d processes.".printf(sel.length));
-                    } else {
-                        confirm_signal(sel[0], Posix.Signal.KILL, "Force Kill",
-                            "Sends SIGKILL - the process is immediately terminated.");
-                    }
-                    return true;
-                }
                 if (_search_bubble != null && !_search_bubble.visible) {
                     unichar uc = Gdk.keyval_to_unicode(kv);
                     if (uc >= 0x20 && uc != 0x7F) {
@@ -279,6 +310,7 @@ namespace Singularity.Apps {
                 return false;
             });
             ((Gtk.Widget)main_window).add_controller(win_key);
+            install_window_actions();
 
             // Start timers
             prev_procs = new HashTable<int, ProcessInfo>(null, null);
@@ -292,10 +324,125 @@ namespace Singularity.Apps {
                 if (_process_timer   != 0) { Source.remove(_process_timer);   _process_timer   = 0; }
                 if (_proc_refresh_id != 0) { Source.remove(_proc_refresh_id); _proc_refresh_id = 0; }
                 gpu_monitor.stop();
+                main_window = null;
                 return false;
             });
 
             main_window.present();
+        }
+
+        public void show_search(string query) {
+            activate();
+            open_search(query);
+        }
+
+        private void confirm_end_when_shown(ProcessInfo info) {
+            if (main_window.is_active) {
+                confirm_signal(info, Posix.Signal.TERM, "End",
+                    "Sends SIGTERM - the process can clean up before exiting.");
+                return;
+            }
+            ulong handler = 0;
+            handler = main_window.notify["is-active"].connect(() => {
+                if (!main_window.is_active) return;
+                main_window.disconnect(handler);
+                confirm_signal(info, Posix.Signal.TERM, "End",
+                    "Sends SIGTERM - the process can clean up before exiting.");
+            });
+        }
+
+        public void show_process(int pid, bool end) {
+            activate();
+            search_entry_widget.text = pid.to_string();
+            _proc_list_model.search = pid.to_string();
+            refresh_processes();
+            for (uint i = 0; i < _proc_list_model.get_n_items(); i++) {
+                var info = _proc_list_model.get_item(i) as ProcessInfo;
+                if (info == null || info.pid != pid) continue;
+                _proc_sel.selected = i;
+                proc_view.scroll_to(i, null, ListScrollFlags.FOCUS | ListScrollFlags.SELECT, null);
+                if (end) confirm_end_when_shown(info);
+                return;
+            }
+        }
+
+        private SimpleAction[] _proc_actions = {};
+        private SimpleAction[] _single_proc_actions = {};
+
+        private SimpleAction add_win_action(string name, owned Singularity.Widgets.Window.BubbleAction func) {
+            var act = new SimpleAction(name, null);
+            act.activate.connect(() => func());
+            main_window.add_action(act);
+            return act;
+        }
+
+        private void install_window_actions() {
+            add_win_action("close", () => main_window.close());
+            add_win_action("find", () => _search_bubble.grab_focus_entry());
+            var sidebar = new SimpleAction.stateful("sidebar", null, new Variant.boolean(main_window.get_sidebar_visible()));
+            sidebar.activate.connect(() => {
+                bool show = !main_window.get_sidebar_visible();
+                main_window.set_sidebar_visible(show);
+                sidebar.set_state(new Variant.boolean(show));
+            });
+            main_window.add_action(sidebar);
+            _proc_actions += add_win_action("copy-name", () => {
+                var sel = get_selected_procs();
+                if (sel.length > 0) main_window.get_clipboard().set_text(sel[0].name);
+            });
+            _proc_actions += add_win_action("copy-pid", () => {
+                var sel = get_selected_procs();
+                if (sel.length > 0) main_window.get_clipboard().set_text(sel[0].pid.to_string());
+            });
+            _proc_actions += add_win_action("end-process", () => signal_selected(Posix.Signal.TERM));
+            _proc_actions += add_win_action("kill-process", () => signal_selected(Posix.Signal.KILL));
+            _proc_actions += add_win_action("suspend-process", () => {
+                foreach (var proc in get_selected_procs())
+                    Posix.kill((Posix.pid_t)proc.pid, Posix.Signal.STOP);
+                refresh_processes();
+            });
+            _proc_actions += add_win_action("resume-process", () => {
+                foreach (var proc in get_selected_procs())
+                    Posix.kill((Posix.pid_t)proc.pid, Posix.Signal.CONT);
+                refresh_processes();
+            });
+            _single_proc_actions += add_win_action("process-properties", () => {
+                var sel = get_selected_procs();
+                if (sel.length == 1) show_proc_properties(sel[0]);
+            });
+            _single_proc_actions += add_win_action("process-maps", () => {
+                var sel = get_selected_procs();
+                if (sel.length == 1) show_proc_maps(sel[0]);
+            });
+            _single_proc_actions += add_win_action("process-files", () => {
+                var sel = get_selected_procs();
+                if (sel.length == 1) show_proc_open_files(sel[0]);
+            });
+            _proc_sel.selection_changed.connect(() => update_proc_actions());
+            _proc_sel.items_changed.connect(() => update_proc_actions());
+            update_proc_actions();
+        }
+
+        private void update_proc_actions() {
+            int n = get_selected_procs().length;
+            foreach (var act in _proc_actions) act.set_enabled(n > 0);
+            foreach (var act in _single_proc_actions) act.set_enabled(n == 1);
+        }
+
+        private void signal_selected(int sig) {
+            var sel = get_selected_procs();
+            if (sel.length == 0) return;
+            bool kill = sig == Posix.Signal.KILL;
+            if (sel.length > 1) {
+                confirm_signal_multi(sel, sig, kill ? "Force Kill" : "End",
+                    (kill ? "Sends SIGKILL to %d processes." : "Sends SIGTERM to %d processes.").printf(sel.length));
+            } else if (kill) {
+                confirm_signal(sel[0], sig, "Force Kill",
+                    "Sends SIGKILL - the process is immediately terminated.");
+            } else {
+                confirm_signal(sel[0], sig, "End",
+                    "Sends SIGTERM - the process can clean up before exiting.");
+            }
         }
 
         private void open_search(string initial) {
@@ -520,6 +667,9 @@ namespace Singularity.Apps {
                 var lbl  = new Label("");
                 lbl.halign = Align.START;
                 lbl.hexpand = true;
+                lbl.ellipsize = Pango.EllipsizeMode.END;
+                lbl.width_chars = 8;
+                lbl.xalign = 0;
                 var badge = new Label("");
                 badge.add_css_class("dim-label");
                 badge.add_css_class("caption");
@@ -595,7 +745,7 @@ namespace Singularity.Apps {
             name_col.expand = true;
             proc_view.append_column(name_col);
 
-            proc_view.append_column(make_proc_column("PID", 70, (item) => {
+            proc_view.append_column(make_proc_column("PID", 62, (item) => {
                 var pi = item as ProcessInfo;
                 var lbl = new Label(pi != null ? pi.pid.to_string() : "-");
                 lbl.halign = Align.END;
@@ -603,7 +753,7 @@ namespace Singularity.Apps {
                 lbl.add_css_class("dim-label");
                 return lbl;
             }));
-            proc_view.append_column(make_proc_column("CPU %", 80, (item) => {
+            proc_view.append_column(make_proc_column("CPU %", 66, (item) => {
                 var pg = item as ProcessGroup;
                 var pi = item as ProcessInfo;
                 double cpu = pg != null ? pg.cpu : (pi != null ? pi.cpu : 0);
@@ -613,7 +763,7 @@ namespace Singularity.Apps {
                 else if (cpu > 20) lbl.add_css_class("monitor-med");
                 return lbl;
             }));
-            proc_view.append_column(make_proc_column("Memory", 90, (item) => {
+            proc_view.append_column(make_proc_column("Memory", 84, (item) => {
                 var pg = item as ProcessGroup;
                 var pi = item as ProcessInfo;
                 ulong mem = pg != null ? pg.mem_kb : (pi != null ? pi.mem_kb : 0);
@@ -621,7 +771,32 @@ namespace Singularity.Apps {
                 lbl.halign = Align.END;
                 return lbl;
             }));
-            proc_view.append_column(make_proc_column("User", 90, (item) => {
+            proc_view.append_column(make_proc_column(_("GPU"), 62, (item) => {
+                var pg = item as ProcessGroup;
+                var pi = item as ProcessInfo;
+                double gpu = pg != null ? pg.gpu : (pi != null ? pi.gpu : 0);
+                uint64 gpu_mem = pg != null ? pg.gpu_mem : (pi != null ? pi.gpu_mem : 0);
+                var lbl = new Label(gpu > 0 || gpu_mem > 0 ? "%.1f%%".printf(gpu) : "");
+                lbl.halign = Align.END;
+                if (gpu_mem > 0) lbl.tooltip_text = _("GPU memory %s").printf(format_size(gpu_mem));
+                if (gpu > 50) lbl.add_css_class("monitor-high");
+                else if (gpu > 20) lbl.add_css_class("monitor-med");
+                return lbl;
+            }));
+            proc_view.append_column(make_proc_column(_("Network"), 86, (item) => {
+                var pg = item as ProcessGroup;
+                var pi = item as ProcessInfo;
+                double rx = pg != null ? pg.net_rx : (pi != null ? pi.net_rx : 0);
+                double tx = pg != null ? pg.net_tx : (pi != null ? pi.net_tx : 0);
+                var lbl = new Label(format_rate(rx + tx));
+                lbl.halign = Align.END;
+                if (rx + tx >= 1) {
+                    lbl.tooltip_text = _("Received %s, sent %s").printf(format_rate(rx) != "" ? format_rate(rx) : "0",
+                        format_rate(tx) != "" ? format_rate(tx) : "0");
+                }
+                return lbl;
+            }));
+            proc_view.append_column(make_proc_column("User", 80, (item) => {
                 var pi = item as ProcessInfo;
                 var lbl = new Label(pi != null ? pi.user : "");
                 lbl.halign = Align.START;
@@ -653,7 +828,7 @@ namespace Singularity.Apps {
             return result;
         }
 
-        private void show_proc_context_menu(Widget widget, ProcessInfo[] procs, Gdk.Rectangle rect) {
+        private void show_proc_context_menu(Widget widget, owned ProcessInfo[] procs, Gdk.Rectangle rect) {
             if (procs.length == 0) return;
             bool multi = procs.length > 1;
             ProcessInfo p = procs[0];
@@ -760,7 +935,7 @@ namespace Singularity.Apps {
             menu.popup();
         }
 
-        private void confirm_signal_multi(ProcessInfo[] procs, int sig, string action, string detail) {
+        private void confirm_signal_multi(owned ProcessInfo[] procs, int sig, string action, string detail) {
             var dialog = new Singularity.Widgets.AppDialog((Gtk.Application)this, true);
             dialog.set_title(_("%s %d processes?").printf(action, procs.length));
             dialog.transient_for = main_window;
@@ -781,6 +956,7 @@ namespace Singularity.Apps {
 
             var cancel_btn = new Button.with_label(_("Cancel"));
             cancel_btn.clicked.connect(() => dialog.close());
+            dialog.set_cancel_button(cancel_btn);
             btns.append(cancel_btn);
 
             var confirm_btn = new Button.with_label(action);
@@ -819,6 +995,7 @@ namespace Singularity.Apps {
 
             var cancel_btn = new Button.with_label(_("Cancel"));
             cancel_btn.clicked.connect(() => dialog.close());
+            dialog.set_cancel_button(cancel_btn);
             btns.append(cancel_btn);
 
             var confirm_btn = new Button.with_label(action);
@@ -845,7 +1022,7 @@ namespace Singularity.Apps {
             box.margin_top = box.margin_bottom = 28;
             box.margin_start = box.margin_end = 28;
 
-            var icon = new Image.from_icon_name("system-run-symbolic");
+            var icon = new Image.from_icon_name("application-x-executable");
             icon.pixel_size = 64;
             icon.halign = Align.CENTER;
             box.append(icon);
@@ -907,6 +1084,7 @@ namespace Singularity.Apps {
             close_btn.halign = Align.END;
             close_btn.add_css_class("close-button");
             close_btn.clicked.connect(() => dialog.close());
+            dialog.set_cancel_button(close_btn);
             box.append(close_btn);
 
             dialog.content_box.append(box);
@@ -989,6 +1167,7 @@ namespace Singularity.Apps {
             close_btn_maps.margin_end = 8;
             close_btn_maps.add_css_class("close-button");
             close_btn_maps.clicked.connect(() => dialog.close());
+            dialog.set_cancel_button(close_btn_maps);
 
             dialog.content_box.append(scroll);
             dialog.content_box.append(close_btn_maps);
@@ -1047,10 +1226,16 @@ namespace Singularity.Apps {
             close_btn_files.margin_end = 8;
             close_btn_files.add_css_class("close-button");
             close_btn_files.clicked.connect(() => dialog.close());
+            dialog.set_cancel_button(close_btn_files);
 
             dialog.content_box.append(scroll);
             dialog.content_box.append(close_btn_files);
             dialog.present();
+        }
+
+        private static string format_rate(double bytes_per_second) {
+            if (bytes_per_second < 1) return "";
+            return _("%s/s").printf(format_size((uint64) bytes_per_second));
         }
 
         private ColumnViewColumn make_str_col(string title, int width, bool expand,
@@ -1351,6 +1536,15 @@ namespace Singularity.Apps {
             });
             prev_procs = new_procs;
 
+            gpu_usage.sample();
+            net_usage.sample();
+            new_procs.foreach((pid, info) => {
+                info.gpu = gpu_usage.busy(pid);
+                info.gpu_mem = gpu_usage.memory(pid);
+                info.net_rx = net_usage.received_rate(pid);
+                info.net_tx = net_usage.sent_rate(pid);
+            });
+
             // Update existing objects in-place so GTK doesn't lose selection
             // or scroll position. Build a list for the grouped model.
             Gee.ArrayList<ProcessInfo> proc_list = new Gee.ArrayList<ProcessInfo>();
@@ -1363,7 +1557,7 @@ namespace Singularity.Apps {
             _proc_list_model.update(proc_list, _proc_list_model.search);
         }
 
-        private ProcessInfo? read_process_info(int pid, ulong hz, ulong uptime) {
+        internal ProcessInfo? read_process_info(int pid, ulong hz, ulong uptime) {
             try {
                 // Name
                 string comm;
@@ -1479,7 +1673,7 @@ namespace Singularity.Apps {
             return icon;
         }
 
-        private int count_cores() {
+        internal int count_cores() {
             int n = 0;
             try {
                 string s;
@@ -1561,7 +1755,7 @@ namespace Singularity.Apps {
 }
 """;
 
-        private string format_kb(ulong kb) {
+        internal string format_kb(ulong kb) {
             if (kb >= 1024 * 1024) return "%.1f GB".printf((double)kb / 1024 / 1024);
             if (kb >= 1024)        return "%.1f MB".printf((double)kb / 1024);
             return "%lu KB".printf(kb);
@@ -1573,11 +1767,11 @@ namespace Singularity.Apps {
             return (ulong)long.parse(parts[1].strip().split(" ")[0]);
         }
 
-        private ulong get_hz() {
+        internal ulong get_hz() {
             return 100; // Assume HZ=100 (standard Linux)
         }
 
-        private ulong get_uptime_ticks() {
+        internal ulong get_uptime_ticks() {
             try {
                 string s;
                 FileUtils.get_contents("/proc/uptime", out s);
