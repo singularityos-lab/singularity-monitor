@@ -121,20 +121,25 @@ namespace Singularity.Apps {
 
         public void update(Gee.ArrayList<ProcessInfo> procs, string search_text) {
             _search = search_text;
+            var expanded = new Gee.HashSet<string>();
+            foreach (var group in _groups) {
+                if (group.expanded) expanded.add(group.name);
+            }
             _groups.clear();
             _group_map.clear();
+            var seen = new Gee.HashSet<int>();
 
             foreach (var p in procs) {
-                if (!matches_search(p)) continue;
-                if (_grouped && p.group_key != "") {
-                    var g = _group_map.get(p.group_key);
-                    if (g == null) {
-                        g = new ProcessGroup(p.group_key, p.icon_name);
-                        _group_map.set(p.group_key, g);
-                        _groups.add(g);
-                    }
-                    g.add(p);
+                if (!seen.add(p.pid) || !matches_search(p)) continue;
+                string key = p.group_key != "" ? p.group_key : p.name;
+                var g = _group_map.get(key);
+                if (g == null) {
+                    g = new ProcessGroup(key, p.icon_name);
+                    g.expanded = expanded.contains(key);
+                    _group_map.set(key, g);
+                    _groups.add(g);
                 }
+                g.add(p);
             }
 
             rebuild();

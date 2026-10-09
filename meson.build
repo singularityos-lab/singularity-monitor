@@ -34,6 +34,12 @@ endif
 
 subdir('ui')
 
+process_model_test = executable('monitor-process-model-test',
+  ['src/models.vala', 'tests/process_model_test.vala'],
+  dependencies: [gtk_dep, gee_dep, cairo_dep, libsingularity_dep],
+  install: false)
+test('monitor-process-model', process_model_test)
+
 resources = gnome.compile_resources(
   'singularity-monitor-resources',
   'resources/dev.sinty.monitor.gresource.xml',
