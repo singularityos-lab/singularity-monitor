@@ -64,6 +64,12 @@ namespace Singularity.Apps {
         public abstract void ClearSuffix(string app_id) throws GLib.Error;
     }
 
+    [DBus (name = "dev.sinty.Shell.AppPause")]
+    interface AppPauseBus : Object {
+        public abstract bool pause(string app_id) throws Error;
+        public abstract bool resume(string app_id) throws Error;
+    }
+
     public class MonitorApp : Singularity.Application {
 
         public MonitorApp() {
@@ -117,6 +123,11 @@ namespace Singularity.Apps {
         private SparkLine mts_spark;
         private Label     mts_value_lbl;
         private Label     mts_sub_lbl;
+
+        private bool      compute_present = false;
+        private SparkLine compute_spark;
+        private Label     compute_value_lbl;
+        private Label     compute_sub_lbl;
 
         // ── Disk ────────────────────────────────────────────────────────────
         private ulong   disk_last_read  = 0;
@@ -534,6 +545,16 @@ namespace Singularity.Apps {
                 col.append(mts_card);
             }
 
+            compute_present = FileUtils.test(COMPUTE_SYSFS, FileTest.IS_DIR);
+            if (compute_present) {
+                compute_value_lbl = new Label("0%");
+                compute_sub_lbl   = new Label("");
+                compute_spark     = new SparkLine(60, "#8e44ad", "#8e44ad");
+                var compute_card  = make_stat_card(_("Sinty Compute"), "media-playlist-repeat-symbolic",
+                                                   compute_spark, compute_value_lbl, compute_sub_lbl);
+                col.append(compute_card);
+            }
+
             return col;
         }
 
@@ -567,6 +588,38 @@ namespace Singularity.Apps {
                 }
             }
             if (mts_cold_path != "" && mts_capacity > 0) mts_present = true;
+        }
+
+        private const string COMPUTE_SYSFS = "/sys/kernel/sinty_compute";
+
+        private uint64 read_compute(string name) {
+            string contents;
+            try {
+                if (!FileUtils.get_contents(COMPUTE_SYSFS + "/" + name, out contents)) return 0;
+            } catch {
+                return 0;
+            }
+            return uint64.parse(contents.strip());
+        }
+
+        private void update_compute() {
+            if (!compute_present) return;
+            string mode = "";
+            try { FileUtils.get_contents(COMPUTE_SYSFS + "/mode", out mode); } catch {}
+            bool enabled = read_compute("enabled") == 1;
+            uint64 hits = read_compute("hits");
+            uint64 misses = read_compute("misses");
+            uint64 lookups = hits + misses;
+            double rate = lookups > 0 ? (double) hits / (double) lookups : 0;
+            compute_spark.push(rate);
+            compute_value_lbl.label = "%d%%".printf((int) (rate * 100));
+            if (!enabled) {
+                compute_sub_lbl.label = _("off");
+                return;
+            }
+            uint64 saved_ms = read_compute("saved_ns") / 1000000;
+            compute_sub_lbl.label = _("%s   %s reused, %s ms saved").printf(mode.strip(),
+                hits.to_string(), saved_ms.to_string());
         }
 
         private void update_mts() {
@@ -873,6 +926,16 @@ namespace Singularity.Apps {
                     Posix.kill((Posix.pid_t)proc.pid, Posix.Signal.CONT);
                 _pending_refresh = true;
             });
+            string? app_scope = multi ? null : app_scope_of(p.pid);
+            if (app_scope != null) {
+                bool paused = scope_paused(app_scope);
+                string scope_id = GLib.Path.get_basename(app_scope);
+                scope_id = scope_id.substring(4, scope_id.length - 10);
+                menu.add_item(paused ? _("Resume App") : _("Pause App"),
+                    paused ? "media-playback-start-symbolic" : "media-playback-pause-symbolic", () => {
+                    set_app_paused.begin(scope_id, !paused);
+                });
+            }
             if (!multi) {
                 menu.add_separator();
                 menu.add_item("Properties", "document-properties-symbolic", () => {
@@ -1233,6 +1296,44 @@ namespace Singularity.Apps {
             dialog.present();
         }
 
+        private static string? app_scope_of(int pid) {
+            string contents;
+            try {
+                if (!FileUtils.get_contents("/proc/%d/cgroup".printf(pid), out contents)) return null;
+            } catch {
+                return null;
+            }
+            foreach (string line in contents.split("\n")) {
+                if (!line.has_prefix("0::")) continue;
+                string path = line.substring(3).strip();
+                string leaf = GLib.Path.get_basename(path);
+                if (leaf.has_prefix("app-") && leaf.has_suffix(".scope") && leaf.length > 10) return path;
+            }
+            return null;
+        }
+
+        private static bool scope_paused(string scope) {
+            string contents;
+            try {
+                if (!FileUtils.get_contents("/sys/fs/cgroup" + scope + "/cgroup.events", out contents)) return false;
+            } catch {
+                return false;
+            }
+            return "frozen 1" in contents;
+        }
+
+        private async void set_app_paused(string app_id, bool paused) {
+            try {
+                AppPauseBus bus = yield Bus.get_proxy(BusType.SESSION, "dev.sinty.desktop",
+                    "/dev/sinty/Shell/AppPause");
+                if (paused) bus.pause(app_id);
+                else bus.resume(app_id);
+            } catch (Error e) {
+                warning("monitor: cannot change the pause state of %s: %s", app_id, e.message);
+            }
+            _pending_refresh = true;
+        }
+
         private static string format_rate(double bytes_per_second) {
             if (bytes_per_second < 1) return "";
             return _("%s/s").printf(format_size((uint64) bytes_per_second));
@@ -1283,6 +1384,7 @@ namespace Singularity.Apps {
             update_disk();
             update_network();
             update_mts();
+            update_compute();
             push_dock_widgets();
             return true;
         }
