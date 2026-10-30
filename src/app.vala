@@ -123,6 +123,10 @@ namespace Singularity.Apps {
         private SparkLine mts_spark;
         private Label     mts_value_lbl;
         private Label     mts_sub_lbl;
+        private Widget    sched_card;
+        private SparkLine sched_spark;
+        private Label     sched_value_lbl;
+        private Label     sched_sub_lbl;
 
         private bool      compute_present = false;
         private SparkLine compute_spark;
@@ -536,6 +540,14 @@ namespace Singularity.Apps {
             col.append(disk_card);
             col.append(net_card);
 
+            sched_value_lbl = new Label("");
+            sched_sub_lbl   = new Label("");
+            sched_spark     = new SparkLine(60, "#2980b9", "#2980b9");
+            sched_card      = make_stat_card("Disk Priority", "drive-harddisk-symbolic",
+                                             sched_spark, sched_value_lbl, sched_sub_lbl);
+            sched_card.visible = false;
+            col.append(sched_card);
+
             if (mts_present) {
                 mts_value_lbl = new Label("0%");
                 mts_sub_lbl   = new Label("");
@@ -620,6 +632,42 @@ namespace Singularity.Apps {
             uint64 saved_ms = read_compute("saved_ns") / 1000000;
             compute_sub_lbl.label = _("%s   %s reused, %s ms saved").printf(mode.strip(),
                 hits.to_string(), saved_ms.to_string());
+        }
+
+        private void update_sched() {
+            int64 limit = 0, misses = 0, sync_us = 0, read_us = 0, background_bytes = 0;
+            bool active = false;
+            try {
+                var dir = Dir.open("/sys/block");
+                string? disk;
+                while ((disk = dir.read_name()) != null) {
+                    string text;
+                    string path = "/sys/block/%s/queue/iosched/stats".printf(disk);
+                    if (!FileUtils.test(path, FileTest.EXISTS)) continue;
+                    FileUtils.get_contents(path, out text);
+                    if (!text.contains("background_limit")) continue;
+                    active = true;
+                    foreach (string line in text.split("\n")) {
+                        string[] parts = line.split(" ");
+                        if (parts.length != 2) continue;
+                        int64 value = int64.parse(parts[1]);
+                        switch (parts[0]) {
+                            case "background_limit": limit += value; break;
+                            case "violations": misses += value; break;
+                            case "sync_p99_us": sync_us = int64.max(sync_us, value); break;
+                            case "read_p99_us": read_us = int64.max(read_us, value); break;
+                            case "background_bytes": background_bytes += value; break;
+                        }
+                    }
+                }
+            } catch (Error e) {}
+            sched_card.visible = active;
+            if (!active) return;
+            double fsync_ms = sync_us / 1000.0;
+            sched_spark.push(double.min(fsync_ms / 50.0, 1.0));
+            sched_value_lbl.label = _("%.1f ms").printf(fsync_ms);
+            sched_sub_lbl.label = _("reads %.1f ms   background limit %s   misses %s   background %s").printf(
+                read_us / 1000.0, limit.to_string(), misses.to_string(), format_kb((ulong)(background_bytes / 1024)));
         }
 
         private void update_mts() {
@@ -1384,6 +1432,7 @@ namespace Singularity.Apps {
             update_disk();
             update_network();
             update_mts();
+            update_sched();
             update_compute();
             push_dock_widgets();
             return true;
