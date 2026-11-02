@@ -634,15 +634,29 @@ namespace Singularity.Apps {
                 hits.to_string(), saved_ms.to_string());
         }
 
+        private bool read_sched_enable() {
+            string text;
+            try {
+                FileUtils.get_contents("/sys/kernel/sinty_scheduler/enable", out text);
+            } catch {
+                return false;
+            }
+            return text.strip() == "1";
+        }
+
         private void update_sched() {
             int64 limit = 0, misses = 0, sync_us = 0, read_us = 0, background_bytes = 0;
             bool active = false;
             try {
+                string[] paths = {};
+                if (read_sched_enable()) paths += "/sys/kernel/sinty_scheduler/stats";
                 var dir = Dir.open("/sys/block");
                 string? disk;
                 while ((disk = dir.read_name()) != null) {
+                    paths += "/sys/block/%s/queue/iosched/stats".printf(disk);
+                }
+                foreach (string path in paths) {
                     string text;
-                    string path = "/sys/block/%s/queue/iosched/stats".printf(disk);
                     if (!FileUtils.test(path, FileTest.EXISTS)) continue;
                     FileUtils.get_contents(path, out text);
                     if (!text.contains("background_limit")) continue;
@@ -670,13 +684,34 @@ namespace Singularity.Apps {
                 read_us / 1000.0, limit.to_string(), misses.to_string(), format_kb((ulong)(background_bytes / 1024)));
         }
 
+        private int64 mts_swap_used() {
+            string text;
+            try {
+                FileUtils.get_contents("/proc/swaps", out text);
+            } catch {
+                return -1;
+            }
+            foreach (var line in text.split("\n")) {
+                var parts = line.replace("\t", " ").split(" ");
+                int64[] nums = {};
+                foreach (var part in parts) {
+                    if (part != "" && part[0].isdigit()) nums += int64.parse(part);
+                }
+                if (nums.length >= 2 && nums[0] * 1024 == mts_capacity) return nums[1] * 1024;
+            }
+            return -1;
+        }
+
         private void update_mts() {
             if (!mts_present) return;
             try {
-                var f = File.new_for_path(mts_cold_path);
-                var info = f.query_info(FileAttribute.STANDARD_ALLOCATED_SIZE,
-                                        FileQueryInfoFlags.NONE);
-                int64 used = (int64)info.get_attribute_uint64(FileAttribute.STANDARD_ALLOCATED_SIZE);
+                int64 used = mts_swap_used();
+                if (used < 0) {
+                    var f = File.new_for_path(mts_cold_path);
+                    var info = f.query_info(FileAttribute.STANDARD_ALLOCATED_SIZE,
+                                            FileQueryInfoFlags.NONE);
+                    used = (int64)info.get_attribute_uint64(FileAttribute.STANDARD_ALLOCATED_SIZE);
+                }
                 double pct = mts_capacity > 0 ? (double)used / (double)mts_capacity : 0;
                 if (pct > 1) pct = 1;
                 if (pct < 0) pct = 0;
