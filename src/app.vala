@@ -650,10 +650,12 @@ namespace Singularity.Apps {
             try {
                 string[] paths = {};
                 if (read_sched_enable()) paths += "/sys/kernel/sinty_scheduler/stats";
-                var dir = Dir.open("/sys/block");
-                string? disk;
-                while ((disk = dir.read_name()) != null) {
-                    paths += "/sys/block/%s/queue/iosched/stats".printf(disk);
+                if (FileUtils.test("/sys/block", FileTest.IS_DIR)) {
+                    var dir = Dir.open("/sys/block");
+                    string? disk;
+                    while ((disk = dir.read_name()) != null) {
+                        paths += "/sys/block/%s/queue/iosched/stats".printf(disk);
+                    }
                 }
                 foreach (string path in paths) {
                     string text;
