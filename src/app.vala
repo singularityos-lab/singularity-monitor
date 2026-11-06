@@ -1696,21 +1696,45 @@ namespace Singularity.Apps {
 
         // ── Process list ────────────────────────────────────────────────────
 
-        private void refresh_processes() {
-            var new_procs = new HashTable<int, ProcessInfo>(null, null);
-            ulong sys_hz = get_hz();
-            ulong uptime_ticks = get_uptime_ticks();
+        private bool _collecting = false;
 
+        private void refresh_processes() {
+            if (_collecting) return;
+            _collecting = true;
+            collect_processes.begin();
+        }
+
+        private static HashTable<int, ProcessInfo> scan_processes(ulong hz, ulong uptime) {
+            var procs = new HashTable<int, ProcessInfo>(null, null);
             try {
                 var proc_dir = Dir.open("/proc");
                 string? entry;
                 while ((entry = proc_dir.read_name()) != null) {
                     if (!entry[0].isdigit()) continue;
                     int pid = int.parse(entry);
-                    var info = read_process_info(pid, sys_hz, uptime_ticks);
-                    if (info != null) new_procs.insert(pid, info);
+                    var info = scan_process(pid, hz, uptime);
+                    if (info != null) procs.insert(pid, info);
                 }
             } catch {}
+            return procs;
+        }
+
+        private async void collect_processes() {
+            ulong sys_hz = get_hz();
+            ulong uptime_ticks = get_uptime_ticks();
+            HashTable<int, ProcessInfo> new_procs;
+            try {
+                new_procs = yield Singularity.Async.run<HashTable<int, ProcessInfo>>((c) => {
+                    return scan_processes(sys_hz, uptime_ticks);
+                }, Singularity.Async.Qos.UTILITY);
+            } catch {
+                _collecting = false;
+                return;
+            }
+            _collecting = false;
+            new_procs.foreach((pid, info) => {
+                info.icon_name = _resolve_icon(info.name, pid);
+            });
 
             // Compute CPU delta
             new_procs.foreach((pid, info) => {
@@ -1746,6 +1770,12 @@ namespace Singularity.Apps {
         }
 
         internal ProcessInfo? read_process_info(int pid, ulong hz, ulong uptime) {
+            var info = scan_process(pid, hz, uptime);
+            if (info != null) info.icon_name = _resolve_icon(info.name, pid);
+            return info;
+        }
+
+        private static ProcessInfo? scan_process(int pid, ulong hz, ulong uptime) {
             try {
                 // Name
                 string comm;
@@ -1785,7 +1815,6 @@ namespace Singularity.Apps {
                 var info = new ProcessInfo();
                 info.pid        = pid;
                 info.name       = comm.strip();
-                info.icon_name  = _resolve_icon(comm.strip(), pid);
                 info.state      = state;
                 info.mem_kb     = mem_kb;
                 info.user       = user;
@@ -1949,7 +1978,7 @@ namespace Singularity.Apps {
             return "%lu KB".printf(kb);
         }
 
-        private ulong parse_kb(string line) {
+        private static ulong parse_kb(string line) {
             var parts = line.split(":");
             if (parts.length < 2) return 0;
             return (ulong)long.parse(parts[1].strip().split(" ")[0]);
