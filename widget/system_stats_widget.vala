@@ -117,9 +117,8 @@ namespace SingularityMonitorWidget {
                 var monitor = new SensorMonitor();
                 monitor.updated.connect(() => {
                     double value = monitor.gpu_utilization;
-                    GLib.Idle.add(() => {
+                    Singularity.Async.post(this, () => {
                         if (sampler_loop == loop) update_gpu(value);
-                        return GLib.Source.REMOVE;
                     });
                 });
                 var timer = new GLib.TimeoutSource.seconds(1);
