@@ -53,6 +53,7 @@ sources = files(
   'src/window.vala',
   'src/app.vala',
   'src/search_provider.vala',
+  'src/agent_intents.vala',
 )
 
 executable('singularity-monitor',
