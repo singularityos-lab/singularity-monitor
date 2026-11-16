@@ -5,6 +5,7 @@ Exec=singularity-monitor
 Icon=dev.sinty.monitor
 Type=Application
 Categories=System;Monitor;
+X-Sinty-FormFactors=desktop;tablet;phone
 Keywords=process;task;cpu;memory;kill;
 StartupNotify=true
 StartupWMClass=dev.sinty.monitor
