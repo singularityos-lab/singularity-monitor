@@ -70,7 +70,7 @@ namespace Singularity.Apps {
         public abstract bool resume(string app_id) throws Error;
     }
 
-    public class MonitorApp : Singularity.Application, Singularity.Migration.Migratable {
+    public class MonitorApp : Singularity.Application, Singularity.Migration.Migratable, Singularity.Startup.Bootable {
 
         public MonitorApp() {
             Object(application_id: "dev.sinty.monitor",
@@ -250,13 +250,46 @@ namespace Singularity.Apps {
             add_action(act_quit);
         }
 
-        protected override void activate() {
+        public Singularity.Startup.Plan build_plan(Singularity.Startup.Request request) {
+            var plan = new Singularity.Startup.Plan();
+            plan.version = "monitor-1";
+            if (request.kind == Singularity.Startup.RequestKind.SERVICE) {
+                plan.main("ready", Singularity.Startup.Category.PREPARE, (c) => {})
+                    .reaches(Singularity.Startup.Milestone.SHELL_READY)
+                    .reaches(Singularity.Startup.Milestone.CONTENT_READY)
+                    .reaches(Singularity.Startup.Milestone.INTERACTIVE);
+                return plan;
+            }
+            plan.main("window", Singularity.Startup.Category.SHELL, (c) => {
+                show_window(false);
+                c.window = main_window;
+            }).reaches(Singularity.Startup.Milestone.SHELL_READY)
+              .reaches(Singularity.Startup.Milestone.CONTENT_READY)
+              .reaches(Singularity.Startup.Milestone.INTERACTIVE);
+            plan.steps("sensors", Singularity.Startup.Category.DEFERRED, (c) => {
+                start_sensors();
+                return false;
+            }).depends_on("window").recoverable("sensors");
+            return plan;
+        }
+
+        public void handle_request(Singularity.Startup.Request request) {
+            show_window();
+        }
+
+        private void show_window(bool sensors = true) {
             if (main_window != null) {
                 main_window.present();
                 return;
             }
-            adopt(new MonitorWindow(this));
+            adopt(new MonitorWindow(this), sensors);
             main_window.present();
+        }
+
+        private void start_sensors() {
+            if (sensors_running || main_window == null) return;
+            gpu_monitor.start(1);
+            sensors_running = true;
         }
 
         private Widget? resources_column = null;
@@ -269,7 +302,7 @@ namespace Singularity.Apps {
             else if (parent is Box) ((Box) parent).remove(widget);
         }
 
-        private void adopt(MonitorWindow w) {
+        private void adopt(MonitorWindow w, bool sensors = true) {
             bool fresh = resources_column == null;
             if (fresh) {
                 setup_styles();
@@ -322,10 +355,7 @@ namespace Singularity.Apps {
             main_window.set_sidebar_width(320);
             main_window.set_sidebar_visible(true);
 
-            if (!sensors_running) {
-                gpu_monitor.start(1);
-                sensors_running = true;
-            }
+            if (sensors) start_sensors();
 
             // Right panel - process list
             detach(processes_panel);
@@ -432,7 +462,7 @@ namespace Singularity.Apps {
         }
 
         public void show_search(string query) {
-            activate();
+            show_window();
             open_search(query);
         }
 
@@ -452,7 +482,7 @@ namespace Singularity.Apps {
         }
 
         public void show_process(int pid, bool end) {
-            activate();
+            show_window();
             search_entry_widget.text = pid.to_string();
             _proc_list_model.search = pid.to_string();
             refresh_processes();
