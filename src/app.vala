@@ -70,7 +70,7 @@ namespace Singularity.Apps {
         public abstract bool resume(string app_id) throws Error;
     }
 
-    public class MonitorApp : Singularity.Application {
+    public class MonitorApp : Singularity.Application, Singularity.Migration.Migratable {
 
         public MonitorApp() {
             Object(application_id: "dev.sinty.monitor",
@@ -255,13 +255,35 @@ namespace Singularity.Apps {
                 main_window.present();
                 return;
             }
-            setup_styles();
-            main_window = new MonitorWindow(this);
+            adopt(new MonitorWindow(this));
+            main_window.present();
+        }
 
-            num_cores       = count_cores();
-            core_last_total = new ulong[num_cores];
-            core_last_idle  = new ulong[num_cores];
-            core_bars       = new MiniBar[num_cores];
+        private Widget? resources_column = null;
+        private Widget? processes_panel = null;
+        private bool sensors_running = false;
+
+        private static void detach(Widget widget) {
+            var parent = widget.get_parent();
+            if (parent is Viewport) ((Viewport) parent).child = null;
+            else if (parent is Box) ((Box) parent).remove(widget);
+        }
+
+        private void adopt(MonitorWindow w) {
+            bool fresh = resources_column == null;
+            if (fresh) {
+                setup_styles();
+                num_cores       = count_cores();
+                core_last_total = new ulong[num_cores];
+                core_last_idle  = new ulong[num_cores];
+                core_bars       = new MiniBar[num_cores];
+                resources_column = build_resources_column();
+                gpu_monitor = new SensorMonitor();
+                gpu_monitor.updated.connect(update_gpu);
+                processes_panel = build_processes_panel();
+                prev_procs = new HashTable<int, ProcessInfo>(null, null);
+            }
+            main_window = w;
 
             // Bubble bar: always-visible SearchBubble (Store pattern,
             // no toggle icon).
@@ -291,20 +313,22 @@ namespace Singularity.Apps {
             main_window.left_scroll.vscrollbar_policy = PolicyType.AUTOMATIC;
             main_window.left_scroll.hexpand = false;
             main_window.left_scroll.propagate_natural_width = false;
-            main_window.left_scroll.set_child(build_resources_column());
+            detach(resources_column);
+            main_window.left_scroll.set_child(resources_column);
             main_window.main_hbox.remove(main_window.left_scroll);
             main_window.main_hbox.remove(main_window.main_sep);
             main_window.set_sidebar(main_window.left_scroll);
             main_window.set_sidebar_width(320);
             main_window.set_sidebar_visible(true);
 
-            gpu_monitor = new SensorMonitor();
-            gpu_monitor.updated.connect(update_gpu);
-            gpu_monitor.start(1);
+            if (!sensors_running) {
+                gpu_monitor.start(1);
+                sensors_running = true;
+            }
 
             // Right panel - process list
-            var right_box = build_processes_panel();
-            main_window.right_host.append(right_box);
+            detach(processes_panel);
+            main_window.right_host.append(processes_panel);
 
             main_window.set_content(main_window.main_hbox);
 
@@ -329,22 +353,81 @@ namespace Singularity.Apps {
             install_window_actions();
 
             // Start timers
-            prev_procs = new HashTable<int, ProcessInfo>(null, null);
-            _resource_timer = Timeout.add(1500, on_resource_tick);
-                _process_timer  = Timeout.add_seconds(_process_interval_sec, () => { if (!_menu_open) refresh_processes(); return true; });
-            on_resource_tick();
-            refresh_processes();
+            if (_resource_timer == 0) _resource_timer = Timeout.add(1500, on_resource_tick);
+            if (_process_timer == 0) _process_timer = Timeout.add_seconds(_process_interval_sec, () => { if (!_menu_open) refresh_processes(); return true; });
+            if (fresh) {
+                on_resource_tick();
+                refresh_processes();
+            }
 
-            main_window.close_request.connect(() => {
+            w.close_request.connect(() => {
+                if (main_window != w) return false;
                 if (_resource_timer  != 0) { Source.remove(_resource_timer);  _resource_timer  = 0; }
                 if (_process_timer   != 0) { Source.remove(_process_timer);   _process_timer   = 0; }
                 if (_proc_refresh_id != 0) { Source.remove(_proc_refresh_id); _proc_refresh_id = 0; }
                 gpu_monitor.stop();
+                sensors_running = false;
                 main_window = null;
                 return false;
             });
+        }
 
-            main_window.present();
+        public Variant save_model() {
+            return new VariantDict().end();
+        }
+
+        public async void restore_model(Variant model) throws Error {
+        }
+
+        public string window_kind(Gtk.Window w) {
+            return (w is MonitorWindow) ? "monitor" : "";
+        }
+
+        public Variant save_window(Gtk.Window w) {
+            var d = new VariantDict();
+            var selected = get_selected_procs();
+            d.insert_value("query", new Variant.string(search_entry_widget.text));
+            d.insert_value("pid", new Variant.int32(selected.length > 0 ? selected[0].pid : -1));
+            d.insert_value("boot", new Variant.string(boot_id()));
+            return d.end();
+        }
+
+        public async Gtk.Window? rebuild_window(string kind, Variant data) throws Error {
+            if (kind != "monitor") return null;
+            if (main_window != null) main_window.destroy();
+            var w = new MonitorWindow(this);
+            adopt(w);
+            var d = new VariantDict(data);
+            string query = (d.lookup_value("query", VariantType.STRING) ?? new Variant.string("")).get_string();
+            search_entry_widget.text = query;
+            if (_proc_list_model.search != query.strip().down()) {
+                _proc_list_model.search = query.strip().down();
+                refresh_processes();
+            }
+            var boot = d.lookup_value("boot", VariantType.STRING);
+            var pid = d.lookup_value("pid", VariantType.INT32);
+            if (boot != null && pid != null && boot.get_string() == boot_id()) select_pid(pid.get_int32());
+            return w;
+        }
+
+        private static string boot_id() {
+            try {
+                string id;
+                FileUtils.get_contents("/proc/sys/kernel/random/boot_id", out id);
+                return id.strip();
+            } catch (Error e) {
+                return "";
+            }
+        }
+
+        private void select_pid(int pid) {
+            for (uint i = 0; i < _proc_list_model.get_n_items(); i++) {
+                var info = _proc_list_model.get_item(i) as ProcessInfo;
+                if (info != null && info.pid == pid) {
+                    _proc_sel.selected = i;
+                    return;
+                }
+            }
         }
 
         public void show_search(string query) {
