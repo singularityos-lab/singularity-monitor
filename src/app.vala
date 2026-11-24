@@ -281,6 +281,7 @@ namespace Singularity.Apps {
                 gpu_monitor = new SensorMonitor();
                 gpu_monitor.updated.connect(update_gpu);
                 processes_panel = build_processes_panel();
+                Singularity.Migration.mark_live(resources_column);
                 prev_procs = new HashTable<int, ProcessInfo>(null, null);
             }
             main_window = w;
@@ -872,6 +873,7 @@ namespace Singularity.Apps {
             // adds its custom column factories below and the
             // monitor-proc-view CSS hook for the process-specific tweaks.
             var view = new Singularity.Widgets.GroupedDataListView();
+            Singularity.Migration.mark_live(view);
             view.set_selection_model(_proc_sel);
             proc_view = view.column_view;
             proc_view.add_css_class("monitor-proc-view");
